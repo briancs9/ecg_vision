@@ -5,7 +5,7 @@ import torch.nn as nn
 import torch.optim as optim
 import time
 from tqdm.auto import tqdm
-import ecg_transformers as transformers
+import ecg_conv_models as models
 from utils import save_model, save_plots
 import torchvision as tv
 import datasets
@@ -25,11 +25,18 @@ epochs = args['epochs']
 device = config.device
 
 print(f"Computation device: {device}\n")
-model = transformers.CCT(num_classes=config.num_classes, 
+
+
+if config.transformer_model == 'conv':
+    model = models.ECG_Model()
+elif config.transformer_model == 'transformer':
+    model = transformers.CCT(num_classes=config.num_classes, 
                         num_heads=config.num_heads, 
                         num_transformer_layers=config.num_transformer_layers, 
                         d_model=config.d_model, 
                         seq_pool=config.seq_pool)
+else:
+    raise ValueError(f"Invalid model: {config.transformer_model}")
 
 print(model)
 

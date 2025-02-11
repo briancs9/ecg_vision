@@ -6,6 +6,7 @@ import datetime
 class Config():
     
     epochs = 1
+    transformer_model = 'conv'
     
     ## data paths
     train_data_path = 'test_data_set/'

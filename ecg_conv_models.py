@@ -97,7 +97,7 @@ class ECG_Model(nn.Module):
         self.lead_axis = LeadAxis(out_dim)
         self.sigmoid = nn.Sigmoid()
     def forward(self, x):
-        #x = x.float()
+        x = x.unsqueeze(1)
         x = self.tokenizer(x)
         x = self.lead_axis(x)
         x = self.sigmoid(x)
