@@ -9,6 +9,7 @@ import ecg_conv_models as models
 from utils import save_model, save_plots
 import torchvision as tv
 import datasets
+import ecg_transformers as transformers
 
 config = config.Config()
 
