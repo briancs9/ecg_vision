@@ -64,7 +64,7 @@ class TempAxis(nn.Module):
                                    nn.Dropout(0.2))
         self.pad = nn.ZeroPad2d((0,0,60,60))
 
-    def sequence_length(self, n_channels=1, height=5000, width=8):
+    def sequence_length(self, n_channels=1, height=5000, width=12):
         return self.forward(torch.zeros((1, n_channels, height, width))).shape[1]
     
     def forward(self, x):
@@ -79,7 +79,7 @@ class LeadAxis(nn.Module):
     def __init__(self, out_dim):
         super().__init__()
         self.out_dim = out_dim
-        self.lead_axis = nn.Sequential(nn.Conv2d(in_channels=64, out_channels=128, kernel_size=(1,8)),
+        self.lead_axis = nn.Sequential(nn.Conv2d(in_channels=64, out_channels=128, kernel_size=(1,12)),
                                        nn.Dropout(0.2),
                                        nn.Flatten(),
                                        nn.Linear(1280,320),

@@ -1,27 +1,35 @@
+import config
 import torch
 import argparse
 import torch.nn as nn
 import torch.optim as optim
 import time
 from tqdm.auto import tqdm
-import models
+import ecg_transformers as transformers
 from utils import save_model, save_plots
-import ecg_model
+import torchvision as tv
+import datasets
 
+config = config.Config()
 
 # construct the argument parser
 parser = argparse.ArgumentParser()
-parser.add_argument('-e', '--epochs', type=int, default=20,
+parser.add_argument('-e', '--epochs', type=int, default=config.epochs,
     help='number of epochs to train our network for')
 args = vars(parser.parse_args())
 
 
 # learning_parameters 
-lr = 1e-3
+lr = config.learning_rate
 epochs = args['epochs']
-device = ('cuda' if torch.cuda.is_available() else 'cpu')
+device = config.device
+
 print(f"Computation device: {device}\n")
-model = ecg_model.CNNTransformerHybrid(num_classes=1).to(device)
+model = transformers.CCT(num_classes=config.num_classes, 
+                        num_heads=config.num_heads, 
+                        num_transformer_layers=config.num_transformer_layers, 
+                        d_model=config.d_model, 
+                        seq_pool=config.seq_pool)
 
 print(model)
 
@@ -33,41 +41,16 @@ total_trainable_params = sum(
     p.numel() for p in model.parameters() if p.requires_grad)
 print(f"{total_trainable_params:,} training parameters.")
 
-# optimizer
-optimizer = optim.Adam(model.parameters(), lr=lr)
+## define training parameters
+optimizer = optim.Adam(model.parameters(), lr=config.learning_rate)
+criterion = config.criterion
+BATCH_SIZE = config.batch_size
+TRAIN_DATA_PATH = config.train_data_path
+TEST_DATA_PATH = config.test_data_path
 
-# loss function
-criterion = nn.BCEWithLogitsLoss()
 
-import torchvision as tv
-
-from torch.utils.data import DataLoader
-import torch
-import pandas as pd
-import torch.nn as nn
-
-# batch size
-BATCH_SIZE = 32
-TRAIN_DATA_PATH = 'data/train'
-TEST_DATA_PATH = 'data/test'
-
-class UnsqueezeImage(nn.Module):
-    def forward(self, x):
-        x = x.unsqueeze(0)
-        return x   
-
-transform_img = tv.transforms.Compose([
-    tv.transforms.Lambda(lambda x: torch.tensor(x.values, dtype=torch.float32)),
-    tv.transforms.Lambda(lambda x: x.transpose(0, 1)),  # Now [8, Length]
-    tv.transforms.Resize((8,5000), antialias=True),
-    #tv.transforms.Lambda(lambda x: x.unsqueeze(0)) 
-])
-
-train_dataset = tv.datasets.DatasetFolder(root=TRAIN_DATA_PATH, transform=transform_img, loader=lambda x: pd.read_csv(x, sep=",", header=0), extensions=".csv")
-test_dataset = tv.datasets.DatasetFolder(root=TEST_DATA_PATH, transform=transform_img, loader=lambda x: pd.read_csv(x, sep=",", header=0), extensions=".csv")
-
-train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True)
-valid_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False)
+train_loader = datasets.train_loader
+valid_loader = datasets.valid_loader
 
 
 
@@ -133,6 +116,7 @@ def validate(model, testloader, criterion):
 # lists to keep track of losses and accuracies
 train_loss, valid_loss = [], []
 train_acc, valid_acc = [], []
+
 # start the training
 for epoch in range(epochs):
     print(f"[INFO]: Epoch {epoch+1} of {epochs}")
@@ -147,10 +131,10 @@ for epoch in range(epochs):
     print(f"Training loss: {train_epoch_loss:.3f}, training acc: {train_epoch_acc:.3f}")
     print(f"Validation loss: {valid_epoch_loss:.3f}, validation acc: {valid_epoch_acc:.3f}")
     print('-'*50)
-    time.sleep(5)
     
 # save the trained model weights
 save_model(epochs, model, optimizer, criterion)
 # save the loss and accuracy plots
 save_plots(train_acc, valid_acc, train_loss, valid_loss)
+
 print('TRAINING COMPLETE')
