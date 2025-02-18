@@ -23,12 +23,13 @@ class Block(nn.Module):
                                bias=False)
         self.bn2 = nn.BatchNorm2d(out_channels)
         
-        self.skip = nn.Conv2d(in_channels=in_channels,
+        self.skip = nn.Sequential(nn.Conv2d(in_channels=in_channels,
                              out_channels=out_channels,
                              kernel_size=1,
                              stride=1,
                              padding='same',
-                             bias=False)
+                             bias=False),
+                                  nn.BatchNorm2d(out_channels))
         self.mp = nn.MaxPool2d(kernel_size=(2,1), padding=0)
         
     def forward(self, x):

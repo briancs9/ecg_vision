@@ -23,7 +23,7 @@ if config.transformer_model == 'transformer':
         v2.Lambda(lambda x: normalize_bound(x.iloc[:,0:12])),
         v2.Lambda(lambda x: torch.tensor(x.values, dtype=torch.float32).unsqueeze(0)),
         v2.Resize(size=(5000,12), antialias=True),
-        v2.Lambda(lambda x: x.permute(0, 2, 1).squeeze(0))
+        v2.Lambda(lambda x: x.squeeze(0))
     ])
 elif config.transformer_model == 'conv':
     transform_img = v2.Compose([

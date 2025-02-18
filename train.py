@@ -39,6 +39,8 @@ elif config.transformer_model == 'transformer':
 else:
     raise ValueError(f"Invalid model: {config.transformer_model}")
 
+model.to(device)
+
 print(model)
 
 
@@ -50,7 +52,7 @@ total_trainable_params = sum(
 print(f"{total_trainable_params:,} training parameters.")
 
 ## define training parameters
-optimizer = optim.Adam(model.parameters(), lr=config.learning_rate)
+optimizer = optim.AdamW(model.parameters(), lr=config.learning_rate)
 criterion = config.criterion
 BATCH_SIZE = config.batch_size
 TRAIN_DATA_PATH = config.train_data_path
@@ -60,6 +62,11 @@ TEST_DATA_PATH = config.test_data_path
 train_loader = datasets.train_loader
 valid_loader = datasets.valid_loader
 
+## learning rate scheduler
+
+scheduler1 = optim.lr_scheduler.ConstantLR(optimizer, factor=1e-2, total_iters=config.warmup_epochs)
+scheduler2 = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=config.epochs-config.warmup_epochs)
+scheduler = optim.lr_scheduler.SequentialLR(optimizer, schedulers=[scheduler1, scheduler2], milestones=[config.warmup_epochs])
 
 
 
@@ -132,17 +139,23 @@ for epoch in range(epochs):
                                               optimizer, criterion)
     valid_epoch_loss, valid_epoch_acc = validate(model, valid_loader,  
                                                  criterion)
+    scheduler.step()
+    updated_lr = scheduler.get_last_lr()
     train_loss.append(train_epoch_loss)
     valid_loss.append(valid_epoch_loss)
     train_acc.append(train_epoch_acc)
     valid_acc.append(valid_epoch_acc)
     print(f"Training loss: {train_epoch_loss:.3f}, training acc: {train_epoch_acc:.3f}")
     print(f"Validation loss: {valid_epoch_loss:.3f}, validation acc: {valid_epoch_acc:.3f}")
+    print(f"Updated learning rate for next epoch: {updated_lr[0]:.6f}")
     print('-'*50)
     
 # save the trained model weights
 save_model(epochs, model, optimizer, criterion)
 # save the loss and accuracy plots
 save_plots(train_acc, valid_acc, train_loss, valid_loss)
+x = print(model)
+with open('model_summary.txt', 'w') as f:
+    f.write(str(x))
 
 print('TRAINING COMPLETE')
