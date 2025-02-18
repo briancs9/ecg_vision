@@ -43,6 +43,7 @@ model.to(device)
 
 print(model)
 
+model.to(device)
 
 # total parameters and trainable parameters
 total_params = sum(p.numel() for p in model.parameters())
