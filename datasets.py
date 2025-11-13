@@ -164,10 +164,10 @@ class ECGDataset(Dataset):
         return image, label
 
 train_dataset = ECGDataset(annotations_file=config.train_annotations_file, 
-                           img_dir=config.train_data_path, 
+                           img_dir=config.data_path, 
                            transform=transform_img)
 val_dataset = ECGDataset(annotations_file=config.val_annotations_file, 
-                          img_dir=config.val_data_path, 
+                          img_dir=config.data_path, 
                           transform=transform_img)
 
 train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True)
