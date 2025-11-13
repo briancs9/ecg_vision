@@ -1,28 +1,29 @@
-import config
+import config as config_module
 import torch
 import argparse
-import torch.nn as nn
 import torch.optim as optim
-import time
 from tqdm.auto import tqdm
 import ecg_conv_models as models
 from utils import save_model, save_plots
-import torchvision as tv
 import datasets
-import ecg_transformers as transformers
+import cct2 as transformers
+import json
 
-config = config.Config()
-
-# construct the argument parser
+# CONSTRUCT THE ARGUMENT PARSER
 parser = argparse.ArgumentParser()
-parser.add_argument('-e', '--epochs', type=int, default=config.epochs,
+parser.add_argument('-e', '--epochs', type=int, default=None,
     help='number of epochs to train our network for')
+parser.add_argument('-c', '--config', type=str, default=None,
+    help='path to JSON config file to load parameters from')
 args = vars(parser.parse_args())
 
+# Initialize config, optionally loading from JSON file
+config = config_module.Config(config_json_path=args['config'])
 
-# learning_parameters 
-lr = config.learning_rate
-epochs = args['epochs']
+# Use command line epochs if provided, otherwise use config default
+epochs = args['epochs'] if args['epochs'] is not None else config.epochs
+
+# LEARNING PARAMETERS 
 device = config.device
 
 print(f"Computation device: {device}\n")
@@ -41,106 +42,113 @@ else:
 
 model.to(device)
 
-print(model)
+print(f'{config.transformer_model} model initialized')
 
-model.to(device)
-
-# total parameters and trainable parameters
-total_params = sum(p.numel() for p in model.parameters())
+# TOTAL PARAMETERS AND TRAINABLE PARAMETERS
+total_params = 0
+total_trainable_params = 0
+for p in model.parameters():
+    num_params = p.numel()
+    total_params += num_params
+    if p.requires_grad:
+        total_trainable_params += num_params
 print(f"{total_params:,} total parameters.")
-total_trainable_params = sum(
-    p.numel() for p in model.parameters() if p.requires_grad)
 print(f"{total_trainable_params:,} training parameters.")
 
-## define training parameters
+## TRAINING PARAMETERS
 optimizer = optim.AdamW(model.parameters(), lr=config.learning_rate)
-criterion = config.criterion
-BATCH_SIZE = config.batch_size
-TRAIN_DATA_PATH = config.train_data_path
-TEST_DATA_PATH = config.test_data_path
-
+pos_weight = torch.tensor([config.pos_weight]).to(device)
+criterion = torch.nn.BCEWithLogitsLoss(pos_weight=pos_weight)
 
 train_loader = datasets.train_loader
-valid_loader = datasets.valid_loader
+val_loader = datasets.val_loader
 
-## learning rate scheduler
+## LEARNING RATE SCHEDULER
+steps_per_epoch = len(train_loader)
+total_steps = epochs * steps_per_epoch
+scheduler = optim.lr_scheduler.OneCycleLR(optimizer,
+                                         max_lr=config.learning_rate,
+                                         total_steps=total_steps,
+                                         pct_start=0.1,  # 10% of training for warmup
+                                         anneal_strategy='cos',
+                                         div_factor=100.0,
+                                         final_div_factor=1000.0)
 
-scheduler1 = optim.lr_scheduler.ConstantLR(optimizer, factor=1e-2, total_iters=config.warmup_epochs)
-scheduler2 = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=config.epochs-config.warmup_epochs)
-scheduler = optim.lr_scheduler.SequentialLR(optimizer, schedulers=[scheduler1, scheduler2], milestones=[config.warmup_epochs])
 
 
-
-# training validation loops
-def train(model, trainloader, optimizer, criterion):
+# TRAINING LOOP
+def train(model, trainloader, optimizer, criterion, scheduler):
     model.train()
     print('Training')
     train_running_loss = 0.0
     train_running_correct = 0
-    counter = 0
-    for i, data in tqdm(enumerate(trainloader), total=len(trainloader)):
-        counter += 1
+    num_batches = len(trainloader)
+    for data in tqdm(trainloader, total=num_batches):
         image, labels = data
-        image = image.to(device)
-        labels = labels.to(device).float()
+        image = image.to(device, non_blocking=True)
+        labels = labels.to(device, non_blocking=True).float()
         optimizer.zero_grad()
         # forward pass
-        outputs = model(image).squeeze(1).float()
+        outputs = model(image).squeeze(1)
         # calculate the loss
         loss = criterion(outputs, labels)
         train_running_loss += loss.item()
-        # calculate the accuracy
-        train_running_correct += (outputs.round() == labels).sum().item()
+        # calculate the accuracy (apply sigmoid to logits before rounding)
+        probs = torch.sigmoid(outputs)
+        train_running_correct += (probs.round() == labels).sum().item()
         # backpropagation
         loss.backward()
         # update the optimizer parameters
         optimizer.step()
+        # step scheduler after each batch (for OneCycleLR)
+        scheduler.step()
     
     # loss and accuracy for the complete epoch
-    epoch_loss = train_running_loss / counter
+    epoch_loss = train_running_loss / num_batches
     epoch_acc = 100. * (train_running_correct / len(trainloader.dataset))
     return epoch_loss, epoch_acc
 
-# validation
-def validate(model, testloader, criterion):
+# VALIDATION LOOP
+def validate(model, val_loader, criterion):
     model.eval()
     print('Validation')
     valid_running_loss = 0.0
     valid_running_correct = 0
-    counter = 0
+    num_batches = len(val_loader)
     with torch.no_grad():
-        for i, data in tqdm(enumerate(testloader), total=len(testloader)):
-            counter += 1
-            
+        for data in tqdm(val_loader, total=num_batches):
             image, labels = data
-            image = image.to(device)
-            labels = labels.to(device).float()
+            image = image.to(device, non_blocking=True)
+            labels = labels.to(device, non_blocking=True).float()
             # forward pass
-            outputs = model(image).squeeze(1).float()
+            outputs = model(image).squeeze(1)
             # calculate the loss
             loss = criterion(outputs, labels)
             valid_running_loss += loss.item()
-            # calculate the accuracy
-            #_, preds = torch.max(outputs.data, 1)
-            valid_running_correct += (outputs.round() == labels).sum().item()
+            # calculate the accuracy (apply sigmoid to logits before rounding)
+            probs = torch.sigmoid(outputs)
+            valid_running_correct += (probs.round() == labels).sum().item()
         
     # loss and accuracy for the complete epoch
-    epoch_loss = valid_running_loss / counter
-    epoch_acc = 100. * (valid_running_correct / len(testloader.dataset))
+    epoch_loss = valid_running_loss / num_batches
+    epoch_acc = 100. * (valid_running_correct / len(val_loader.dataset))
     return epoch_loss, epoch_acc
 
-# lists to keep track of losses and accuracies
+# LIST TO KEEP TRACK OF LOSSES AND ACCURACIES
 train_loss, valid_loss = [], []
 train_acc, valid_acc = [], []
 
-# start the training
+# START THE TRAINING
+best_acc = 0
+# Pre-compute config_state once to avoid recreating it multiple times
+config_state = {key:value for key, value in config.__dict__.items() if not key.startswith('_') and not callable(value)}
 for epoch in range(epochs):
     print(f"[INFO]: Epoch {epoch+1} of {epochs}")
     train_epoch_loss, train_epoch_acc = train(model, train_loader, 
-                                              optimizer, criterion)
-    valid_epoch_loss, valid_epoch_acc = validate(model, valid_loader,  
+                                              optimizer, criterion, scheduler)
+    valid_epoch_loss, valid_epoch_acc = validate(model, val_loader,  
                                                  criterion)
-    scheduler.step()
+    # Get current learning rate (scheduler is stepped per batch, not per epoch)
     updated_lr = scheduler.get_last_lr()
     train_loss.append(train_epoch_loss)
     valid_loss.append(valid_epoch_loss)
@@ -151,12 +159,10 @@ for epoch in range(epochs):
     print(f"Updated learning rate for next epoch: {updated_lr[0]:.6f}")
     print('-'*50)
     
-# save the trained model weights
-save_model(epochs, model, optimizer, criterion)
-# save the loss and accuracy plots
+    if valid_epoch_acc > best_acc:
+        best_acc = valid_epoch_acc
+        save_model(epochs, model, optimizer, criterion, config_dict=config_state)
+
 save_plots(train_acc, valid_acc, train_loss, valid_loss)
-x = print(model)
-with open('model_summary.txt', 'w') as f:
-    f.write(str(x))
 
 print('TRAINING COMPLETE')
