@@ -3,7 +3,7 @@ import torch
 import argparse
 import torch.optim as optim
 from tqdm.auto import tqdm
-import ecg_conv_models as models
+import models
 from utils import save_model, save_plots
 import datasets
 import cct2 as transformers
