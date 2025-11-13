@@ -10,8 +10,8 @@ class Config():
         self.epochs = 20
         self.warmup_epochs = 1
         self.transformer_model = 'conv'
-        self.train_annotations_file = 'annotations.csv'
-        self.val_annotations_file = 'annotations.csv'
+        self.train_annotations_file = 'train_annotations.csv'
+        self.val_annotations_file = 'val_annotations.csv'
         self.pos_weight = 5.
         
         ## data paths
