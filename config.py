@@ -10,19 +10,18 @@ class Config():
         self.epochs = 20
         self.warmup_epochs = 1
         self.transformer_model = 'conv'
-        self.train_annotations_file = 'train_annotations.csv'
-        self.val_annotations_file = 'val_annotations.csv'
+        self.train_annotations_file = 'annotations.csv'
+        self.val_annotations_file = 'annotations.csv'
         self.pos_weight = 5.
         
         ## data paths
         self.output_dir = 'outputs_' + datetime.datetime.now().strftime("%Y-%m-%d_%H-%M")
-        self.train_data_path = 'test_data_set/'
-        self.val_data_path = 'test_data_set/'
+        self.data_path = '/data1/shaffeb1/csv_data/'
 
         ## model parameters
         self.num_classes = 1
         #self.criterion = nn.BCELoss()
-        self.batch_size = 8
+        self.batch_size = 128
         self.learning_rate = 5e-3
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
         
