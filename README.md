@@ -1,9 +1,8 @@
-# ECG Atrial Fibrillation Classification - Inference
+# ECG Atrial Fibrillation Prediction
 
-A deep learning framework for electrocardiogram (ECG) atrial fibrillation detection using transformer-based architecture. This project provides tools for inference on XML formatted images derived from the GE MUSE system.
-
-**Repository**: [GitHub](https://github.com/briancs9/ecg_vision/tree/main)  
-**Model Weights**: [Hugging Face](https://huggingface.co/bcs0098330/ecg_cct_small/tree/main)
+A deep learning framework for electrocardiogram (ECG) atrial fibrillation prediction using compact convolutional transformer-based architecture. This project provides tools for inference on XML or CSV formatted images.
+ 
+**Pre-Trained Model Weights**: [Hugging Face](https://huggingface.co/bcs0098330/ecg_cct_small/tree/main)
 
 ## Project Structure
 
@@ -19,10 +18,6 @@ A deep learning framework for electrocardiogram (ECG) atrial fibrillation detect
 
 ## Installation
 
-### Requirements
-
-Install dependencies from `requirements.txt`:
-
 ```bash
 # Clone the repository
 git clone https://github.com/briancs9/ecg_vision.git
@@ -34,19 +29,11 @@ pip install -r requirements.txt
 
 ### Downloading Model Weights
 
-The pre-trained model weights are available on Hugging Face. You can download them using one of the following methods:
-
-#### Option 1: Using Hugging Face Hub (Recommended)
-
-First, install the `huggingface_hub` package if you haven't already:
+The pre-trained model weights are available on Hugging Face:
 
 ```bash
 pip install huggingface_hub
-```
 
-Then download the model files:
-
-```bash
 from huggingface_hub import hf_hub_download
 
 # Download model checkpoint
@@ -64,22 +51,7 @@ config_path = hf_hub_download(
 )
 ```
 
-#### Option 2: Using Git LFS
-
-If you have Git LFS installed, you can clone the repository:
-
-```bash
-git lfs install
-git clone https://huggingface.co/bcs0098330/ecg_cct_small
-```
-
-#### Option 3: Manual Download
-
-1. Visit the [model page](https://huggingface.co/bcs0098330/ecg_cct_small/tree/main) on Hugging Face
-2. Click on the files you need:
-   - `ecg_cct_small.pth` - The model weights (15.4 MB)
-   - `config.json` - The configuration file
-3. Download the files to your local directory
+Or manually download using the link provided above.
 
 After downloading, you can use the model checkpoint file with the inference script:
 
@@ -93,7 +65,7 @@ python inference_file.py -f /path/to/ecg_file.xml -m ./models/ecg_cct_small.pth
 
 ## Data Preparation
 
-### Converting GE MUSE XML Files to CSV
+### Converting XML Files to CSV
 
 The `inference_file.py` script can automatically convert XML files from the GE MUSE system to CSV format before running inference. However, if you prefer to convert files separately, you can use the `ecg_xml_parser.py` script directly. This script extracts ECG lead data from MUSE XML files and saves it as CSV files.
 
@@ -147,12 +119,6 @@ python ecg_xml_parser.py /data/muse_xml_files --output_dir /data/csv_files
 # Output files will be named based on the input XML filenames
 ```
 
-The parser automatically:
-- Detects the XML file encoding
-- Extracts rhythm waveform data
-- Converts binary ECG data to numerical values
-- Applies appropriate gain scaling
-- Handles missing or invalid data
 
 ## Data Format
 
@@ -266,14 +232,6 @@ A transformer-based architecture for ECG classification:
 **Input**: `(batch, height, width)` where height=5000 (time steps), width=8 (leads)  
 **Output**: Binary classification logits (atrial fibrillation probability)
 
-## Data Preprocessing
-
-The preprocessing pipeline transforms raw ECG data into a standardized format suitable for the transformer model. When an ECG CSV file is loaded, the system first extracts the first eight columns, which represent the different ECG leads. Each column contains time-series data representing the electrical activity captured by that particular lead. 
-
-The data is then resized to a fixed length of 5000 time points using linear interpolation applied independently to each column. This ensures that ECG recordings of varying durations are standardized to the same temporal resolution, which is essential for the transformer architecture. The interpolation preserves the signal characteristics while adjusting the temporal sampling rate.
-
-Finally, each column undergoes min-max normalization, where the minimum and maximum values within that column are identified, and all values are scaled to the range [0, 1]. This normalization is performed column-wise rather than globally, ensuring that each ECG lead maintains its relative signal amplitude characteristics. This preprocessing sequence is applied consistently during inference to match the data format used during model training, ensuring that predictions are made on data that has been transformed in the same manner as the training data.
-
 ## Output Files
 
 ### Inference Outputs
@@ -336,14 +294,3 @@ python inference_file.py -d /data/csv_files -m ./models/ecg_cct_small.pth --outp
 cat results.csv
 ```
 
-## License
-
-[Add your license information here]
-
-## Citation
-
-[Add citation information if applicable]
-
-## Contact
-
-[Add contact information if desired]
