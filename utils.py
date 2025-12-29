@@ -9,18 +9,57 @@ import config
 
 config = config.Config()
 
-def save_model(epochs, model, optimizer, criterion, config_dict=None):
+
+def create_model(config, models_module):
+    """
+    Create and initialize a model based on config.
+    
+    Args:
+        config: Config object with model parameters
+        models_module: The models module (e.g., import models)
+    
+    Returns:
+        Initialized model
+    """
+    if config.transformer_model == 'transformer':
+        # Calculate dim_feedforward from mlp_ratio if available
+        dim_feedforward = getattr(config, 'd_model', 256) * getattr(config, 'mlp_ratio', 4)
+        # Handle backward compatibility: convert use_pos_encoding to positional_embedding
+        use_pos_encoding = getattr(config, 'use_pos_encoding', True)
+        if hasattr(config, 'positional_embedding'):
+            positional_embedding = config.positional_embedding
+        else:
+            positional_embedding = 'sine' if use_pos_encoding else 'none'
+        model = models_module.ECG_Transformer(
+            num_classes=config.num_classes,
+            num_encoder_layers=getattr(config, 'num_transformer_layers', 6),
+            d_model=getattr(config, 'd_model', 64),
+            nhead=getattr(config, 'num_heads', 8),
+            dim_feedforward=dim_feedforward,
+            dropout=getattr(config, 'te_dropout', 0.1),
+            seq_pool=getattr(config, 'seq_pool', True),
+            positional_embedding=positional_embedding,
+            sequence_length=getattr(config, 'sequence_length', None)
+        )
+        print('ECG_Transformer model initialized')
+    else:
+        model = models_module.ECG_Model(out_dim=config.num_classes)
+        print('ECG_Model initialized')
+    
+    return model
+
+def save_model(current_epoch, model, optimizer, criterion, config_dict=None):
     os.makedirs(config.output_dir, exist_ok=True)
     now = datetime.datetime.now()
     datetime_str = now.strftime("%Y-%m-%d_%H-%M")
     
     # Save model checkpoint
     torch.save({
-                'epoch': epochs,
+                'epoch': current_epoch,
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
                 'loss': criterion,
-                }, f'{config.output_dir}/model_{datetime_str}_epoch_{epochs}.pth')
+                }, f'{config.output_dir}/model_{datetime_str}_epoch_{current_epoch}.pth')
     
     # Save config dictionary if provided
     if config_dict is not None:
@@ -34,7 +73,7 @@ def save_plots(train_acc, valid_acc, train_loss, valid_loss):
     os.makedirs(config.output_dir, exist_ok=True)
     now = datetime.datetime.now()
     # accuracy plots
-    plt.figure(figsize=(10, 7))
+    plt.figure(figsize=(10, 10))
     plt.plot(
         train_acc, color='green', linestyle='-', 
         label='train accuracy'
@@ -49,7 +88,7 @@ def save_plots(train_acc, valid_acc, train_loss, valid_loss):
     plt.savefig(f'{config.output_dir}/accuracy_{now.strftime("%Y-%m-%d_%H-%M")}.png')
     
     # loss plots
-    plt.figure(figsize=(10, 7))
+    plt.figure(figsize=(10, 10))
     plt.plot(
         train_loss, color='orange', linestyle='-', 
         label='train loss'
