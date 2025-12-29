@@ -7,33 +7,28 @@ import os
 class Config():
     def __init__(self, config_json_path=None):
         ##training run parameters
-        self.epochs = 20
-        self.warmup_epochs = 1
-        self.transformer_model = 'conv'
-        self.train_annotations_file = 'train_annotations.csv'
-        self.val_annotations_file = 'val_annotations.csv'
-        self.pos_weight = 5.
+        self.epochs = 30
+        self.warmup = 3
+        self.batch_size = 256
+        self.learning_rate = 1e-4
+        self.annealing = 1e-2
+        self.transformer_model = 'conv'  # options: 'transformer' or 'conv'
+        self.train_annotations_file = 'annotations/train_annotations.csv'
+        self.val_annotations_file = 'annotations/val_annotations.csv'
+        self.pos_weight = 16.
+        self.num_classes = 1
+        self.d_model = 256
+        self.num_heads = 8
+        self.te_dropout = 0.1
+        self.use_pos_encoding = True
+        self.num_transformer_layers = 6
+        self.weight_decay = 1e-4
+        self.num_classes = 1
+        self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
         
         ## data paths
         self.output_dir = 'outputs_' + datetime.datetime.now().strftime("%Y-%m-%d_%H-%M")
         self.data_path = '/data1/shaffeb1/csv_data/'
-
-        ## model parameters
-        self.num_classes = 1
-        #self.criterion = nn.BCELoss()
-        self.batch_size = 128
-        self.learning_rate = 5e-3
-        self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
-        
-        
-        if self.transformer_model == 'transformer':
-            self.num_transformer_layers = 3
-            self.num_heads = 8
-            self.d_model = 256
-            self.seq_pool = True
-            self.mlp_ratio = 4
-            self.te_dropout = 0.1
-            assert self.d_model % self.num_heads == 0
         
         # Load parameters from JSON file if provided
         if config_json_path is not None:
@@ -87,5 +82,6 @@ class Config():
                 raise ValueError(f"d_model ({self.d_model}) must be divisible by num_heads ({self.num_heads})")
         
         print(f"Configuration loaded from: {json_path}")
+
 
 
