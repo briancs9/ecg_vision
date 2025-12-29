@@ -4,10 +4,11 @@ import argparse
 import torch.optim as optim
 from tqdm.auto import tqdm
 import models
-from utils import save_model, save_plots
+from utils import save_model, save_plots, create_model
 import datasets
-import cct2 as transformers
 import json
+import numpy as np
+from sklearn.metrics import average_precision_score, f1_score
 
 # CONSTRUCT THE ARGUMENT PARSER
 parser = argparse.ArgumentParser()
@@ -28,21 +29,10 @@ device = config.device
 
 print(f"Computation device: {device}\n")
 
-
-if config.transformer_model == 'conv':
-    model = models.ECG_Model()
-elif config.transformer_model == 'transformer':
-    model = transformers.CCT(num_classes=config.num_classes, 
-                        num_heads=config.num_heads, 
-                        num_transformer_layers=config.num_transformer_layers, 
-                        d_model=config.d_model, 
-                        seq_pool=config.seq_pool)
-else:
-    raise ValueError(f"Invalid model: {config.transformer_model}")
+# Initialize model based on config
+model = create_model(config, models)
 
 model.to(device)
-
-print(f'{config.transformer_model} model initialized')
 
 # TOTAL PARAMETERS AND TRAINABLE PARAMETERS
 total_params = 0
@@ -64,20 +54,29 @@ train_loader = datasets.train_loader
 val_loader = datasets.val_loader
 
 ## LEARNING RATE SCHEDULER
-steps_per_epoch = len(train_loader)
-total_steps = epochs * steps_per_epoch
-scheduler = optim.lr_scheduler.OneCycleLR(optimizer,
-                                         max_lr=config.learning_rate,
-                                         total_steps=total_steps,
-                                         pct_start=0.1,  # 10% of training for warmup
-                                         anneal_strategy='cos',
-                                         div_factor=100.0,
-                                         final_div_factor=1000.0)
+# Custom scheduler with warmup and linear annealing
+def lr_lambda(epoch):
+    initial_lr = config.learning_rate
+    warmup_epochs = config.warmup
+    annealing_rate = config.annealing
+    total_epochs = epochs
+    
+    if epoch < warmup_epochs:
+        # Warmup phase: linearly increase from 0 to initial_lr
+        return epoch / warmup_epochs
+    else:
+        # Linear annealing phase: decay from initial_lr to initial_lr * annealing_rate
+        # Calculate progress through annealing phase (0 to 1)
+        annealing_progress = (epoch - warmup_epochs) / (total_epochs - warmup_epochs)
+        # Linearly interpolate between 1.0 and annealing_rate
+        return 1.0 - annealing_progress * (1.0 - annealing_rate)
+
+scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
 
 
 
 # TRAINING LOOP
-def train(model, trainloader, optimizer, criterion, scheduler):
+def train(model, trainloader, optimizer, criterion):
     model.train()
     print('Training')
     train_running_loss = 0.0
@@ -100,8 +99,6 @@ def train(model, trainloader, optimizer, criterion, scheduler):
         loss.backward()
         # update the optimizer parameters
         optimizer.step()
-        # step scheduler after each batch (for OneCycleLR)
-        scheduler.step()
     
     # loss and accuracy for the complete epoch
     epoch_loss = train_running_loss / num_batches
@@ -115,6 +112,8 @@ def validate(model, val_loader, criterion):
     valid_running_loss = 0.0
     valid_running_correct = 0
     num_batches = len(val_loader)
+    all_probs = []
+    all_labels = []
     with torch.no_grad():
         for data in tqdm(val_loader, total=num_batches):
             image, labels = data
@@ -128,41 +127,70 @@ def validate(model, val_loader, criterion):
             # calculate the accuracy (apply sigmoid to logits before rounding)
             probs = torch.sigmoid(outputs)
             valid_running_correct += (probs.round() == labels).sum().item()
+            # collect probabilities and labels for AUPRC calculation
+            all_probs.extend(probs.cpu().numpy())
+            all_labels.extend(labels.cpu().numpy())
         
     # loss and accuracy for the complete epoch
     epoch_loss = valid_running_loss / num_batches
     epoch_acc = 100. * (valid_running_correct / len(val_loader.dataset))
-    return epoch_loss, epoch_acc
+    # calculate AUPRC
+    auprc = average_precision_score(all_labels, all_probs)
+    # calculate F1 score (convert probabilities to binary predictions)
+    all_probs_array = np.array(all_probs)
+    all_labels_array = np.array(all_labels)
+    binary_preds = (all_probs_array >= 0.5).astype(int)
+    f1 = f1_score(all_labels_array, binary_preds)
+    return epoch_loss, epoch_acc, auprc, f1
 
 # LIST TO KEEP TRACK OF LOSSES AND ACCURACIES
 train_loss, valid_loss = [], []
 train_acc, valid_acc = [], []
+valid_auprc = []
+valid_f1 = []
 
 # START THE TRAINING
-best_acc = 0
+best_valid_acc = 0
+best_f1_score = 0.0
+best_valid_loss = float('inf')
 # Pre-compute config_state once to avoid recreating it multiple times
 config_state = {key:value for key, value in config.__dict__.items() if not key.startswith('_') and not callable(value)}
 for epoch in range(epochs):
     print(f"[INFO]: Epoch {epoch+1} of {epochs}")
     train_epoch_loss, train_epoch_acc = train(model, train_loader, 
-                                              optimizer, criterion, scheduler)
-    valid_epoch_loss, valid_epoch_acc = validate(model, val_loader,  
+                                              optimizer, criterion)
+    valid_epoch_loss, valid_epoch_acc, valid_epoch_auprc, valid_epoch_f1 = validate(model, val_loader,  
                                                  criterion)
-    # Get current learning rate (scheduler is stepped per batch, not per epoch)
+    # Get current learning rate
     updated_lr = scheduler.get_last_lr()
+    # Step scheduler after each epoch
+    scheduler.step()
     train_loss.append(train_epoch_loss)
     valid_loss.append(valid_epoch_loss)
     train_acc.append(train_epoch_acc)
     valid_acc.append(valid_epoch_acc)
+    valid_auprc.append(valid_epoch_auprc)
+    valid_f1.append(valid_epoch_f1)
     print(f"Training loss: {train_epoch_loss:.3f}, training acc: {train_epoch_acc:.3f}")
-    print(f"Validation loss: {valid_epoch_loss:.3f}, validation acc: {valid_epoch_acc:.3f}")
+    print(f"Validation loss: {valid_epoch_loss:.3f}, validation acc: {valid_epoch_acc:.3f}, validation AUPRC: {valid_epoch_auprc:.4f}, validation F1: {valid_epoch_f1:.4f}")
     print(f"Updated learning rate for next epoch: {updated_lr[0]:.6f}")
     print('-'*50)
     
-    if valid_epoch_acc > best_acc:
-        best_acc = valid_epoch_acc
-        save_model(epochs, model, optimizer, criterion, config_dict=config_state)
+    # Save model if F1 score improved OR validation loss decreased
+    should_save = False
+    if valid_epoch_f1 > best_f1_score:
+        best_f1_score = valid_epoch_f1
+        should_save = True
+        print(f"New best F1 score: {best_f1_score:.4f}")
+    if valid_epoch_loss < best_valid_loss:
+        best_valid_loss = valid_epoch_loss
+        should_save = True
+        print(f"New best validation loss: {best_valid_loss:.3f}")
+    
+    if should_save:
+        save_model(epoch+1, model, optimizer, criterion, config_dict=config_state)
 
 save_plots(train_acc, valid_acc, train_loss, valid_loss)
 
 print('TRAINING COMPLETE')
+
