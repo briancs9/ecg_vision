@@ -149,16 +149,25 @@ class ECGDataset(Dataset):
     def __init__(self, annotations_file, img_dir, transform=None):
         self.transform = transform
         self.img_dir = img_dir
-        self.img_labels = pd.read_csv(annotations_file)
+        # Explicitly specify header=0 to ensure first row is treated as column names
+        self.img_labels = pd.read_csv(annotations_file, header=0)
+        # Check if labels column exists (second column)
+        self.has_labels = len(self.img_labels.columns) >= 2
     
     def __len__(self):
         return len(self.img_labels)
     
     def __getitem__(self, idx):
+        # Access by column index (0='file', 1='label')
+        # pandas automatically skips the header row, so idx=0 is the first data row
         img_name = self.img_labels.iloc[idx, 0]
         img_path = os.path.join(self.img_dir, img_name)
         image = pd.read_csv(img_path, sep=",", header=0)
-        label = self.img_labels.iloc[idx, 1]
+        # Only access label if it exists, otherwise return 0 as placeholder
+        if self.has_labels:
+            label = self.img_labels.iloc[idx, 1]
+        else:
+            label = 0  # Placeholder value when no labels are available
         if self.transform:
             image = self.transform(image)
         return image, label
@@ -172,3 +181,4 @@ val_dataset = ECGDataset(annotations_file=config.val_annotations_file,
 
 train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True)
 val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False)
+
