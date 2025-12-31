@@ -1,6 +1,6 @@
 # ECG Atrial Fibrillation Prediction
 
-A deep learning framework for electrocardiogram (ECG) atrial fibrillation prediction using compact convolutional transformer-based architecture. This project provides tools for inference on XML or CSV formatted images.
+A deep learning framework for prediction of atrial fibrillation risk from electrocardiogram (ECG) waveforms using a compact convolutional transformer-based architecture.
  
 **Pre-Trained Model Weights**: [Hugging Face](https://huggingface.co/bcs0098330/ecg_cct_small/tree/main)
 
