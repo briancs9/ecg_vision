@@ -12,7 +12,7 @@ class Config():
         self.batch_size = 256
         self.learning_rate = 1e-4
         self.annealing = 1e-2
-        self.transformer_model = 'conv'  # options: 'transformer' or 'conv'
+        self.transformer_model = 'transformer'  # options: 'transformer' or 'conv'
         self.train_annotations_file = 'annotations/train_annotations.csv'
         self.val_annotations_file = 'annotations/val_annotations.csv'
         self.pos_weight = 16.
