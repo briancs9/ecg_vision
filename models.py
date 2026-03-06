@@ -75,7 +75,6 @@ class ECG_Model(nn.Module):
 
 
 class SinusoidalPositionalEncoding(nn.Module):
-    """Sinusoidal positional encoding for transformer."""
     def __init__(self, d_model, max_len=5000):
         super().__init__()
         pe = torch.zeros(max_len, d_model)
@@ -92,7 +91,6 @@ class SinusoidalPositionalEncoding(nn.Module):
 
 
 class TransformerEncoderBlock(nn.Module):
-    """Transformer encoder block with multi-head self-attention and feed-forward."""
     def __init__(self, d_model, nhead, dim_feedforward=2048, dropout=0.1):
         super().__init__()
         self.self_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout, batch_first=True)
@@ -120,17 +118,14 @@ class TransformerEncoderBlock(nn.Module):
 
 
 class ECG_Transformer(nn.Module):
-    """ECG Transformer model using compact convolutional transformer format."""
     def __init__(self, num_classes=1, num_encoder_layers=6, d_model=64, nhead=8, 
                  dim_feedforward=2048, dropout=0.1, seq_pool=True, 
                  positional_embedding='sine', sequence_length=None):
         super().__init__()
         
-        # Validate positional_embedding parameter
         positional_embedding = positional_embedding if \
             positional_embedding in ['sine', 'learnable', 'none'] else 'sine'
         
-        # Tokenizer: first 6 blocks of TempAxis + ZeroPad2d
         tokenizer_blocks = [
             Block(1, 16, padding=(3,0)),
             Block(16, 16, padding=(3,0)),
@@ -148,7 +143,6 @@ class ECG_Transformer(nn.Module):
         self.seq_pool = seq_pool
         self.num_tokens = 0
         
-        # Compute sequence_length if not provided
         if sequence_length is None:
             if positional_embedding != 'none':
                 # Compute sequence length by running a dummy input through tokenizer
@@ -163,12 +157,10 @@ class ECG_Transformer(nn.Module):
         else:
             self.sequence_length = sequence_length
         
-        # Assert sequence_length is provided if positional_embedding is not 'none'
         assert self.sequence_length is not None or positional_embedding == 'none', \
             f"Positional embedding is set to {positional_embedding} and" \
             f" the sequence length was not specified."
         
-        # Handle seq_pool option
         pos_emb_length = self.sequence_length
         if not seq_pool:
             if pos_emb_length is not None:
@@ -179,7 +171,6 @@ class ECG_Transformer(nn.Module):
         else:
             self.attention_pool = nn.Linear(d_model, 1)
         
-        # Handle positional encoding
         if positional_embedding != 'none':
             if positional_embedding == 'learnable':
                 self.positional_emb = nn.Parameter(torch.zeros(1, pos_emb_length, d_model),
@@ -199,18 +190,13 @@ class ECG_Transformer(nn.Module):
                 TransformerEncoderBlock(d_model, nhead, dim_feedforward, dropout)
             )
         self.transformer = nn.Sequential(*encoder_layers)
-        
         self.norm = nn.LayerNorm(d_model)
-        
         self.fc = nn.Linear(d_model, num_classes)
-        
         self.dropout = nn.Dropout(p=dropout)
-        
         self.apply(self.init_weight)
         
     @staticmethod
     def sinusoidal_embedding(n_channels, dim):
-        """Create sinusoidal positional embeddings."""
         pe = torch.FloatTensor([[p / (10000 ** (2 * (i // 2) / dim)) for i in range(dim)]
                                 for p in range(n_channels)])
         pe[:, 0::2] = torch.sin(pe[:, 0::2])
@@ -219,7 +205,6 @@ class ECG_Transformer(nn.Module):
     
     @staticmethod
     def init_weight(m):
-        """Initialize weights similar to TransformerClassifier."""
         if isinstance(m, nn.Linear):
             nn.init.trunc_normal_(m.weight, std=.02)
             if m.bias is not None:
@@ -249,26 +234,21 @@ class ECG_Transformer(nn.Module):
         B, C, H, W = x.shape
         x = x.squeeze(-1).permute(0, 2, 1)  # (B, seq_len, d_model)
         
-        # Handle padding if positional_emb is None and sequence is shorter than expected
         if self.positional_emb is None and self.sequence_length is not None and x.size(1) < self.sequence_length:
             x = F.pad(x, (0, 0, 0, self.sequence_length - x.size(1)), mode='constant', value=0)
         
-        # Add class token if seq_pool is False
         if not self.seq_pool:
             cls_token = self.class_emb.expand(x.shape[0], -1, -1)
             x = torch.cat((cls_token, x), dim=1)
         
-        # Add positional encoding if enabled
         if self.positional_emb is not None:
             x = x + self.positional_emb
         
         x = self.dropout(x)
         
-        # Transformer encoder
         x = self.transformer(x)  # (B, seq_len, d_model)
         x = self.norm(x)
         
-        # Sequence pooling: (B, seq_len, d_model) -> (B, d_model)
         if self.seq_pool:
             # Attention-based pooling
             x = torch.matmul(F.softmax(self.attention_pool(x), dim=1).transpose(-1, -2), x).squeeze(-2)
@@ -276,7 +256,6 @@ class ECG_Transformer(nn.Module):
             # Use class token (first token)
             x = x[:, 0]
         
-        # Classification
         x = self.fc(x)  # (B, num_classes)
         
         return x
