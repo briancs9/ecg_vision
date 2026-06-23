@@ -5,19 +5,6 @@ A deep learning framework for electrocardiogram (ECG) atrial fibrillation detect
 **Repository**: [GitHub](https://github.com/briancs9/ecg_vision/tree/main)  
 **Model Weights**: [Hugging Face](https://huggingface.co/bcs0098330/ecg_cct_small/tree/main)
 
-## Project Structure
-
-```
-.
-├── config.py              # Configuration management with JSON support
-├── datasets.py            # Data loading and preprocessing utilities
-├── models.py              # Transformer model architectures
-├── ecg_xml_parser.py      # XML to CSV converter for GE MUSE system files
-├── inference_file.py      # Main inference script
-├── temperature_scaling.py # Fit calibration on a validation cohort
-└── utils.py               # Model creation, calibration helpers, etc.
-```
-
 ## Installation
 
 ### Requirements
@@ -108,26 +95,15 @@ python inference_file.py -f /path/to/ecg_file.csv -m ./models/ecg_cct_small.pth 
 
 ### Calibrated inference (default)
 
-By default, `inference_file.py` applies post-hoc calibration from `calibration.json` in the same directory as the model checkpoint. The output CSV includes:
+By default, `inference_file.py` applies post-hoc calibration from `calibration.json` in the same directory as the model checkpoint. Model inference can therefore be assumed as the model estimate of atrial fibrillation/flutter incidence over the observation period. The output CSV includes:
 
 - `prediction` — calibrated probability
 - `prediction_uncalibrated` — raw `sigmoid(logit)` for reference
 
 Use `--uncalibrated` to skip calibration and return only raw probabilities.
 
-To fit or update the calibrator on a held-out validation cohort:
+The temperature scaling file can be used to fit or update the calibrator on a local dataset.
 
-```bash
-python temperature_scaling.py \
-  -m ./models/ecg_cct_small.pth \
-  -v /path/to/val_data \
-  -a annotations/val_annotations.csv \
-  --config ./models/config.json \
-  --method compare \
-  --output_dir ./models
-```
-
-This writes `./models/calibration.json`. Supported methods: `temperature`, `platt`, and `isotonic` (best ECE is selected automatically with `--method compare`).
 
 ## Data Preparation
 
