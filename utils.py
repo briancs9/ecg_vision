@@ -5,22 +5,13 @@ matplotlib.style.use('ggplot')
 import os
 import datetime
 import json
+import numpy as np
 import config
 
 config = config.Config()
 
 
 def create_model(config, models_module):
-    """
-    Create and initialize a model based on config.
-    
-    Args:
-        config: Config object with model parameters
-        models_module: The models module (e.g., import models)
-    
-    Returns:
-        Initialized model
-    """
     if config.transformer_model == 'transformer':
         # Calculate dim_feedforward from mlp_ratio if available
         dim_feedforward = getattr(config, 'd_model', 256) * getattr(config, 'mlp_ratio', 4)
@@ -47,6 +38,81 @@ def create_model(config, models_module):
         print('ECG_Model initialized')
     
     return model
+
+
+def normalize_calibration_artifact(artifact):
+    artifact = dict(artifact)
+    if 'method' not in artifact:
+        if 'temperature' in artifact:
+            artifact['method'] = 'temperature'
+            artifact['parameters'] = {'temperature': artifact['temperature']}
+        else:
+            raise ValueError("Calibration artifact must include 'method' or 'temperature'")
+    if 'parameters' not in artifact:
+        raise ValueError("Calibration artifact is missing 'parameters'")
+    return artifact
+
+
+def load_calibration(path):
+    with open(path, 'r') as f:
+        return normalize_calibration_artifact(json.load(f))
+
+
+def find_calibration_near_model(model_path):
+    model_dir = os.path.dirname(os.path.abspath(model_path))
+    for name in ('calibration.json', 'temperature.json'):
+        candidate = os.path.join(model_dir, name)
+        if os.path.exists(candidate):
+            return candidate
+    return None
+
+
+def resolve_calibration_path(model_path, uncalibrated=False, calibration_path=None):
+    if uncalibrated:
+        return None
+    if calibration_path is not None:
+        if not os.path.exists(calibration_path):
+            raise FileNotFoundError(f"Calibration file not found: {calibration_path}")
+        return calibration_path
+    found = find_calibration_near_model(model_path)
+    if found is None:
+        raise FileNotFoundError(
+            "Calibrated inference is the default but no calibration.json or temperature.json "
+            f"was found next to the model: {os.path.dirname(os.path.abspath(model_path))}. "
+            "Use --uncalibrated to return raw sigmoid(logit) probabilities."
+        )
+    return found
+
+
+def apply_calibration(logits, artifact):
+    artifact = normalize_calibration_artifact(artifact)
+    if isinstance(logits, torch.Tensor):
+        logits_np = logits.detach().cpu().numpy()
+    else:
+        logits_np = np.asarray(logits, dtype=np.float64)
+    logits_np = logits_np.reshape(-1)
+
+    method = artifact['method']
+    params = artifact['parameters']
+
+    if method == 'temperature':
+        scaled = logits_np / float(params['temperature'])
+        return torch.sigmoid(torch.tensor(scaled)).numpy()
+
+    if method == 'platt':
+        scaled = float(params['weight']) * logits_np + float(params['bias'])
+        return torch.sigmoid(torch.tensor(scaled)).numpy()
+
+    if method == 'isotonic':
+        uncal = torch.sigmoid(torch.tensor(logits_np)).numpy()
+        return np.interp(
+            uncal,
+            np.asarray(params['x_thresholds'], dtype=np.float64),
+            np.asarray(params['y_thresholds'], dtype=np.float64),
+        )
+
+    raise ValueError(f"Unknown calibration method: {method}")
+
 
 def save_model(current_epoch, model, optimizer, criterion, config_dict=None):
     os.makedirs(config.output_dir, exist_ok=True)
