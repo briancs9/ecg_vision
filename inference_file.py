@@ -8,9 +8,13 @@ from torchvision.transforms import v2
 from tqdm.auto import tqdm
 from types import SimpleNamespace
 import models
-from utils import create_model
+from utils import (
+    create_model,
+    apply_calibration as apply_calibration_logits,
+    load_calibration,
+    resolve_calibration_path,
+)
 import datasets
-import tempfile
 import shutil
 from pathlib import Path
 
@@ -186,7 +190,7 @@ class DirectoryDataset(Dataset):
         return image, 0  # Return dummy label, we'll get filename from dataset
 
 
-def run_inference(model, data_loader, device, dataset, output_path=None):
+def run_inference(model, data_loader, device, dataset, output_path=None, calibration_artifact=None):
     """
     Run inference on data.
     
@@ -196,6 +200,7 @@ def run_inference(model, data_loader, device, dataset, output_path=None):
         device: Device to run inference on
         dataset: Dataset object to access filenames
         output_path: Optional path to save predictions CSV
+        calibration_artifact: Optional calibration dict from load_calibration()
     
     Returns:
         predictions: List of predictions (probabilities)
@@ -203,7 +208,9 @@ def run_inference(model, data_loader, device, dataset, output_path=None):
     """
     model.eval()
     all_predictions = []
+    all_uncalibrated = []
     all_filenames = []
+    use_calibration = calibration_artifact is not None
     
     with torch.no_grad():
         for batch_idx, (images, _) in enumerate(tqdm(data_loader, desc="Running inference")):
@@ -216,13 +223,15 @@ def run_inference(model, data_loader, device, dataset, output_path=None):
             if outputs.dim() > 1:
                 outputs = outputs.squeeze(1)
             
-            # Conv model outputs logits, need to apply sigmoid
-            probs = torch.sigmoid(outputs)
-            
-            # Convert to numpy
-            probs_np = probs.cpu().numpy()
+            uncal_probs = torch.sigmoid(outputs)
+            if use_calibration:
+                probs_np = apply_calibration_logits(outputs, calibration_artifact)
+            else:
+                probs_np = uncal_probs.cpu().numpy()
             
             all_predictions.extend(probs_np)
+            if use_calibration:
+                all_uncalibrated.extend(uncal_probs.cpu().numpy())
             
             # Get filenames from dataset
             start_idx = batch_idx * data_loader.batch_size
@@ -232,10 +241,17 @@ def run_inference(model, data_loader, device, dataset, output_path=None):
     
     # Save predictions if output path is provided
     if output_path:
-        results_df = pd.DataFrame({
-            'file': all_filenames,
-            'prediction': all_predictions
-        })
+        if use_calibration:
+            results_df = pd.DataFrame({
+                'file': all_filenames,
+                'prediction': all_predictions,
+                'prediction_uncalibrated': all_uncalibrated,
+            })
+        else:
+            results_df = pd.DataFrame({
+                'file': all_filenames,
+                'prediction': all_predictions,
+            })
         results_df.to_csv(output_path, index=False)
         print(f"\nPredictions saved to: {output_path}")
     
@@ -263,8 +279,11 @@ Examples:
   # With custom output and batch size
   python inference_file.py -f /path/to/file.csv -m model.pth --output predictions.csv --batch_size 64
   
-  # With custom batch size
-  python inference_file.py -d /path/to/csv_dir -m model.pth --batch_size 64
+  # Uncalibrated probabilities (opt-out)
+  python inference_file.py -f /path/to/file.csv -m model.pth --uncalibrated
+
+  # Explicit calibration artifact path
+  python inference_file.py -f /path/to/file.csv -m model.pth --calibration ./models/calibration.json
         '''
     )
     
@@ -281,6 +300,10 @@ Examples:
                         help='Path to save predictions CSV (optional, defaults to predictions.csv in current working directory)')
     parser.add_argument('--batch_size', type=int, default=None,
                         help='Batch size for inference (overrides config default)')
+    parser.add_argument('--uncalibrated', action='store_true',
+                        help='Return raw sigmoid(logit) probabilities without post-hoc calibration')
+    parser.add_argument('--calibration', type=str, default=None,
+                        help='Path to calibration.json (default: auto-detect next to model)')
     parser.add_argument('--include-calculated-leads', action='store_true', default=False,
                         help='Include calculated leads (III, aVR, aVL, aVF) when converting XML files (default: False)')
     parser.add_argument('--temp-dir', type=str, default=None,
@@ -370,6 +393,17 @@ Examples:
     model = load_model_from_checkpoint(args.model_path, config)
     transform_img = create_transform()
 
+    calibration_path = resolve_calibration_path(
+        args.model_path,
+        uncalibrated=args.uncalibrated,
+        calibration_path=args.calibration,
+    )
+    calibration_artifact = None
+    if calibration_path is not None:
+        calibration_artifact = load_calibration(calibration_path)
+        print(f"Using calibration: {calibration_path}")
+        print(f"  method: {calibration_artifact['method']}")
+
     if args.file:
         file_to_load = temp_csv_path if temp_csv_path else args.file
         print(f"Loading file: {file_to_load}")
@@ -396,7 +430,10 @@ Examples:
         if not os.path.isabs(output_path):
             output_path = os.path.join(os.getcwd(), output_path)
     
-    predictions, filenames = run_inference(model, data_loader, device, dataset, output_path)
+    predictions, filenames = run_inference(
+        model, data_loader, device, dataset, output_path,
+        calibration_artifact=calibration_artifact,
+    )
     
     print(f"\nInference complete!")
     print(f"Total samples: {len(predictions)}")
